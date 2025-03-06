@@ -74,12 +74,3 @@ jobs:
       run: |
         pytest tests/ --cov=src --cov-report=xml
         echo "timestamp=$(date +%s)" >> report_meta.txt
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: audit-${{ matrix.audit_type }}-data
-        path: |
-          audit_reports/
-          coverage.xml
-        retention-days: 1
