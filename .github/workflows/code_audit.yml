@@ -1,0 +1,85 @@
+name: Code Audit System
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/11 * * * *'  # Randomized intervals
+  push:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'qa_system/**'
+  pull_request:
+    branches: [main]
+
+jobs:
+  audit-execution:
+    name: Audit (${{ matrix.audit_type }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        audit_type: ['security', 'performance', 'style', 'typing']
+        python: ['3.10', '3.11']
+        os: [ubuntu-latest]
+        exclude:
+          - audit_type: security
+            python: '3.11'
+        include:
+          - audit_type: security
+            flags: "--bandit --safety"
+          - audit_type: performance
+            flags: "--benchmark --profile"
+      max-parallel: 4
+      fail-fast: false
+
+    timeout-minutes: 235  # 3h55m
+    continue-on-error: true
+
+    steps:
+    - name: Random startup delay
+      run: sleep $((RANDOM % 600))  # 0-10 minute delay
+
+    - name: Checkout with history
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1000
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install -e .
+        [ "${{ matrix.audit_type }}" = "security" ] && pip install bandit safety
+
+    - name: Initialize audit environment
+      run: |
+        mkdir -p audit_reports
+        python -c "from qa_system import init; init()"
+
+    - name: Execute audit system
+      env:
+        API_ID: ${{ secrets.AUDIT_API_ID }}
+        API_HASH: ${{ secrets.AUDIT_API_HASH }}
+        BOT_TOKEN: ${{ secrets.AUDIT_BOT_TOKEN }}
+        AUDIT_TYPE: ${{ matrix.audit_type }}
+      run: |
+        make background-operations &
+        python -m qa_system.bot_service --type ${{ matrix.audit_type }} &
+        wait
+
+    - name: Generate reports
+      run: |
+        pytest tests/ --cov=src --cov-report=xml
+        echo "timestamp=$(date +%s)" >> report_meta.txt
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: audit-${{ matrix.audit_type }}-data
+        path: |
+          audit_reports/
+          coverage.xml
+        retention-days: 1
